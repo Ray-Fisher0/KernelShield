@@ -1,17 +1,23 @@
-// SPDX-License-Identifier: GPL
+#include <linux/proc_fs.h>
 #include <linux/module.h>
 #include <linux/kprobes.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
 #include <linux/version.h>
 
+
+// SPDX-License-Identifier: GPL-2.0
 MODULE_DESCRIPTION("Kprobe-based watcher for kallsyms_lookup_name('sys_call_table')");
-MODULE_AUTHOR("Your Name");
 MODULE_LICENSE("GPL");
 
 #define MAX_SYM_NAME   64
 #define WATCH1         "sys_call_table"
 #define WATCH2         "ia32_sys_call_table"
+
+#define ALERT_PROC_NAME "kallsyms_alert"
+#define ALERT_MSG_LEN 256
+static char alert_msg[ALERT_MSG_LEN];
+static struct proc_dir_entry *alert_proc_entry;
 
 struct lookup_event {
     char name[MAX_SYM_NAME];
@@ -45,6 +51,23 @@ static int safe_copy_kstr(char *dst, const void *src, size_t dst_len)
     dst[dst_len - 1] = '\0';
     return 0;
 }
+
+// /proc read handler to show the last alert message
+static ssize_t alert_proc_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+    int len;
+    if (*ppos > 0)
+        return 0;
+    len = strnlen(alert_msg, ALERT_MSG_LEN);
+    if (copy_to_user(buf, alert_msg, len))
+        return -EFAULT;
+    *ppos = len;
+    return len;
+}
+
+static const struct proc_ops alert_proc_fops = {
+    .proc_read = alert_proc_read,
+};
 
 /* Architecture helpers to fetch the first argument and IP */
 static inline unsigned long get_ip_from_regs(struct pt_regs *regs)
@@ -85,10 +108,7 @@ static int entry_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 
     if (arg_name) {
         if (safe_copy_kstr(ev->name, arg_name, sizeof(ev->name)) == 0) {
-            if (strnstr(ev->name, WATCH1, sizeof(ev->name)) ||
-                strnstr(ev->name, WATCH2, sizeof(ev->name))) {
-                ev->matched = true;
-            }
+            ev->matched = true; // Always mark as matched to log all calls
         }
     }
 
@@ -104,8 +124,10 @@ static int ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 
     if (ev->matched) {
         unsigned long ret = (unsigned long)regs_return_value(regs);
-        pr_warn("[kprobe-syscalltbl] pid=%d comm=%s requested=\"%s\" ip=0x%lx => addr=0x%lx\n",
-                ev->pid, ev->comm, ev->name, ev->caller_ip, ret);
+        snprintf(alert_msg, ALERT_MSG_LEN,
+                 "ALERT: pid=%d comm=%s requested=\"%s\" ip=0x%lx addr=0x%lx\n",
+                 ev->pid, ev->comm, ev->name, ev->caller_ip, ret);
+        pr_warn("[kprobe-kallsyms] %s", alert_msg);
     }
     return 0;
 }
@@ -128,12 +150,19 @@ static int __init kprobe_syscalltbl_init(void)
         return ret;
     }
     pr_info("kretprobe registered for %s (maxactive=%d)\n", target_func, krp.maxactive);
+    alert_proc_entry = proc_create(ALERT_PROC_NAME, 0444, NULL, &alert_proc_fops);
+    if (!alert_proc_entry) {
+        pr_err("Failed to create /proc/%s\n", ALERT_PROC_NAME);
+    }
+    alert_msg[0] = '\0';
     return 0;
 }
 
 static void __exit kprobe_syscalltbl_exit(void)
 {
     unregister_kretprobe(&krp);
+    if (alert_proc_entry)
+        proc_remove(alert_proc_entry);
     pr_info("kretprobe unregistered: %d instances missed\n", krp.nmissed);
 }
 
