@@ -1,18 +1,14 @@
 
 # Rootkit Detector Group Project
 
-In this project, the contributers each worked together to create similar yet different approaches for detecting rootkit activity to determine which one was the most effective for detection. What follows is the details of our work.
+In this project, the contributers each worked together to create similar yet different approaches for detecting rootkit activity to determine which one was the most effective for detection. What follows is the details of our work. This project is designed for educational and research purposes, providing a robust foundation for kernel security analysis.
 
-For approach 1 what was made was a Linux kernel module for detecting rootkit activity by monitoring suspicious access to the system call table. This project is designed for educational and research purposes, providing a robust foundation for kernel security analysis.
-
-For approach 2 
-
----
+--
 
 ## Table of Contents
 - [What is a Rootkit?](#what-is-a-rootkit)
 - [Why Rootkit Detection Matters](#why-rootkit-detection-matters)
-- [Overview of How the Rootkit Detector Works](#overview-of-how-the-rootkit-detector-works)
+- [Overview of Approach 1](#overview-of-approach-1)
 - [How to Run the Detector](#how-to-run-the-detector)
 - [Project Structure](#project-structure)
 - [License](#license)
@@ -31,22 +27,39 @@ Rootkits are dangerous because they can provide persistent, stealthy control ove
 
 Rootkit detection is important because rootkits can compromise the trustworthiness of a system, evade traditional antivirus tools, and facilitate further attacks. By monitoring for suspicious kernel activity—such as attempts to access the system call table—our detection module helps identify potential rootkit behavior early, allowing administrators to respond before significant damage occurs.
 
-## Overview of How the Rootkit Detector Works
+## Overview of Approach 1
 
-`module.c` implements the rootkit detection logic using Linux kprobes and kretprobes. Its main features include:
+For approach 1, the strategy implemented leverages kernel probes (kprobes and kretprobes) to monitor the usage of the `kallsyms_lookup_name` function, which is frequently used by rootkits to locate and manipulate sensitive kernel symbols. By tracking calls to this function, it can detect attempts to resolve addresses of critical kernel structures, such as the system call table, even if the attacker does not directly modify the table 
 
-- Registration of a kretprobe on the `kallsyms_lookup_name` function, which is commonly used by rootkits to locate the system call table.
-- Architecture-aware helpers to extract the instruction pointer and function arguments from the CPU register set, supporting x86, x86_64, and ARM64.
-- Safe copying of kernel strings to avoid faults or buffer overflows.
-- Handlers for kretprobe entry and return events, which log suspicious symbol lookups and record relevant process information.
-- Creation of a `/proc/kallsyms_alert` entry to expose the latest alert message to user space.
-- Proper initialization and cleanup routines for module loading and unloading, including probe registration and `/proc` entry management.
+Additionally a second Linux kernel module was created to detect rootkit activity by monitoring suspicious modifications to the system call table. This approach is based on the idea that many rootkits attempt to alter syscall table entries to hijack system functionality.
 
-The module is designed to detect and log attempts to access sensitive kernel symbols, providing visibility into potential rootkit activity. All alerts are written to the kernel log and made available via the `/proc` filesystem for monitoring.
+**How Approach1 Works:**
+- Registers a kretprobe on `kallsyms_lookup_name` to intercept and log symbol lookups.
+- Captures process information and the symbol being queried, providing context for potential rootkit activity.
+- Alerts are written to the kernel log and exposed via a `/proc` entry for user-space monitoring.
+- Supports multiple architectures (x86, x86_64, ARM64) with safe handling of kernel strings and register sets.
+- For Kernel Versions < 4.0
+   - Takes a baseline snapshot of the syscall table(s) at module load.
+   - Periodically compares the current table entries to the baseline.
+   - Logs any detected changes, which may indicate rootkit activity.
+   - Alerts are written to the kernel log for administrator review.
+
+**Advantages:**
+- Provides direct detection of syscall table modifications, a common rootkit technique.
+- Simple and effective for older kernels where the syscall table is exported.
+- First part detects rootkit behavior before actual modification occurs, by monitoring suspicious symbol resolution attempts while the second part can monitor anything that is missed.
+- Works on newer kernels where direct syscall table access is restricted, as it does not require exported syscall table symbols.
+
+**Limitations:**
+- Syscall table monitoring only works on Linux Kernel versions 4.0 and lower, as newer kernels do not export the necessary symbols.
+
+**Summary:**
+- Part of Approach 1 is effective for modern kernels (4.1 and above) where Approach1/module_scan cannot operate.
+- It provides early warning of rootkit activity by tracking symbol resolution attempts, not just table modifications.
 
 ---
 
-## How to Run the Detector For Approach1
+## How to Run the Detector For Approach 1
 
 Follow these steps to build and run the kernel module:
 
@@ -74,20 +87,7 @@ When you want to unload the module:
 
 ---
 
-
-## Explanation of `module_scan` for Approach1
-
-`module_scan.c` is a kernel module designed to monitor the system call table for suspicious modifications, which are often indicative of rootkit activity. It periodically scans the syscall table(s) and logs any changes to their entries, providing early detection of tampering attempts.
-
-**Important Limitation:**
-This module can only be used on Linux Kernel versions 4.0 and lower. Starting with kernel 4.1, critical symbols such as `kallsyms_lookup_name` and the system call table are no longer exported, making it impossible for this module to resolve their addresses without additional patches or workarounds. If you attempt to use `module_scan` on newer kernels, it will fail to locate the necessary symbols and will not function.
-
-**Summary:**
-- Use `module_scan.c` only on Linux Kernel 4.0 or lower.
-- It relies on exported kernel symbols to monitor syscall tables.
-- On newer kernels, consider alternative detection approaches or consult kernel documentation for symbol access limitations.
-
-## Project Structure for Approach1
+## Project Structure for Approach 1
 
 - `module.c` — Main kernel module implementation for rootkit detection.
 - `module.h` — Header file containing core definitions and function prototypes.
