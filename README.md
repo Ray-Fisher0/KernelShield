@@ -62,7 +62,7 @@ Follow these steps to build and run the kernel module:
    - Run `make` in the project directory to compile the module.
 
 2. **Load the module:**
-   - Use `sudo insmod module.ko` to insert the Layer1 module into the kernel.
+   - Use `sudo insmod detect_kall.ko` to insert the Layer1 module into the kernel.
    - Navigate to X86 folder in Layer2:
       - Use the command `sudo insmod module_scan.ko` to create Layer2
    - Check the kernel log (`dmesg`) for messages indicating successful registration with `sudo dmesg | tail`
@@ -74,7 +74,7 @@ Follow these steps to build and run the kernel module:
 When you want to unload the module:
 
 - **Unload the module:**
-   - Use `sudo rmmod module` to remove the module from the kernel.
+   - Use `sudo rmmod detect_kall` to remove the module from the kernel.
       - The same goes for module_scan
    - Check `dmesg` for cleanup messages.
 

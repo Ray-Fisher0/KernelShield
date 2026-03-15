@@ -62,4 +62,3 @@ static void __exit test_kln_exit(void)
 
 module_init(test_kln_init);
 module_exit(test_kln_exit);
-``
